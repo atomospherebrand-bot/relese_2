@@ -113,35 +113,7 @@ function normalizeDayConfig(config: RawDayConfig): DaySchedule {
 }
 
 function createDefaultMasters(): Master[] {
-  return [
-    {
-      id: randomUUID(),
-      name: "Александр",
-      nickname: "INKMAN",
-      telegram: "inkman_tattoo",
-      specialization: "Черно-белая графика, реализм, минимализм",
-      avatar: undefined,
-      isActive: true,
-    },
-    {
-      id: randomUUID(),
-      name: "Мария",
-      nickname: "INK_QUEEN",
-      telegram: "ink_queen_art",
-      specialization: "Цветные работы, акварель",
-      avatar: undefined,
-      isActive: true,
-    },
-    {
-      id: randomUUID(),
-      name: "Дмитрий",
-      nickname: "DARK_ART",
-      telegram: "dark_art_ink",
-      specialization: "Дарк-арт, блэкворк",
-      avatar: undefined,
-      isActive: false,
-    },
-  ];
+  return [];
 }
 
 function createDefaultServices(): Service[] {

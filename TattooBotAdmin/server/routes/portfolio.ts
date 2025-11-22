@@ -56,6 +56,8 @@ const createSchema = z.object({
     .optional(),
 });
 
+const updateSchema = createSchema.partial();
+
 router.get("/", async (req, res, next) => {
   try {
     const { masterId, style, q, page, pageSize } = listSchema.parse(req.query);
@@ -166,6 +168,41 @@ router.post("/", async (req, res, next) => {
       .returning();
 
     res.status(201).json({ item: inserted });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch("/:id", async (req, res, next) => {
+  try {
+    const id = z.string().uuid().parse(req.params.id);
+    const body = updateSchema.parse(req.body);
+
+    const updateData: Record<string, unknown> = {};
+    if (body.url !== undefined) updateData.url = body.url;
+    if (body.title !== undefined) updateData.title = body.title;
+    if (body.description !== undefined) updateData.description = body.description?.trim() || "";
+    if (body.masterId !== undefined) updateData.masterId = body.masterId ?? null;
+    if (body.style !== undefined) updateData.style = body.style ? body.style.trim() : null;
+    if (body.mediaType !== undefined) updateData.mediaType = body.mediaType;
+    if (body.thumbnail !== undefined) updateData.thumbnail = body.thumbnail ?? null;
+    if (body.attachments !== undefined) updateData.attachments = body.attachments;
+
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({ message: "Нет данных для обновления" });
+    }
+
+    const [updated] = await db
+      .update(portfolioTable)
+      .set(updateData)
+      .where(eq(portfolioTable.id, id))
+      .returning();
+
+    if (!updated) {
+      return res.status(404).json({ message: "Работа не найдена" });
+    }
+
+    res.json({ item: updated });
   } catch (err) {
     next(err);
   }

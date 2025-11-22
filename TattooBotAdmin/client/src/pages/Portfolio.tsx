@@ -1,6 +1,7 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { type PortfolioItem } from "@shared/schema";
 import PortfolioFilters from "@/components/PortfolioFilters";
 import PortfolioDialog from "@/components/PortfolioDialog";
 import PortfolioGallery from "@/components/PortfolioGallery";
@@ -25,6 +26,9 @@ export default function Portfolio() {
   const [filters, setFilters] = React.useState<{ masterId?: string; style?: string; q?: string }>({});
   const [page, setPage] = React.useState(1);
   const [open, setOpen] = React.useState(false);
+  const [editing, setEditing] = React.useState<
+    (PortfolioItem & { masterName?: string | null; thumbnail?: string | null }) | null
+  >(null);
 
   const queryKey = React.useMemo(
     () => [
@@ -90,7 +94,7 @@ export default function Portfolio() {
         </Button>
       </div>
 
-      <PortfolioFilters value={filters} onChange={setFilters} onAdd={() => setOpen(true)} />
+      <PortfolioFilters value={filters} onChange={setFilters} onAdd={() => { setEditing(null); setOpen(true); }} />
 
       {isLoading ? (
         <Card className="grid gap-4 border-white/10 bg-black/20 p-6 sm:grid-cols-2 xl:grid-cols-3">
@@ -117,6 +121,10 @@ export default function Portfolio() {
             onDelete={async (id) => {
               await api.deletePortfolioItem(id);
               refresh();
+            }}
+            onEdit={(item) => {
+              setEditing(item);
+              setOpen(true);
             }}
           />
 
@@ -165,7 +173,7 @@ export default function Portfolio() {
         </>
       )}
 
-      <PortfolioDialog open={open} onClose={() => setOpen(false)} onSaved={refresh} />
+      <PortfolioDialog open={open} onClose={() => { setOpen(false); setEditing(null); }} onSaved={refresh} item={editing ?? undefined} />
     </div>
   );
 }

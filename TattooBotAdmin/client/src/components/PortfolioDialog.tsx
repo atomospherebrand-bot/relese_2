@@ -1,5 +1,6 @@
 import React from "react";
 import { api } from "@/lib/api";
+import { type PortfolioItem } from "@shared/schema";
 import { useQuery } from "@tanstack/react-query";
 import {
   Dialog,
@@ -33,6 +34,7 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onSaved: () => void;
+  item?: PortfolioItem & { masterName?: string | null };
 };
 
 type FiltersData = Awaited<ReturnType<typeof api.getPortfolioFilters>>;
@@ -53,7 +55,7 @@ function useFilePreview(file: File | null) {
   return preview;
 }
 
-export default function PortfolioDialog({ open, onClose, onSaved }: Props) {
+export default function PortfolioDialog({ open, onClose, onSaved, item }: Props) {
   const { toast } = useToast();
   const { data } = useQuery<{ masters: FiltersData["masters"]; styles: FiltersData["styles"] }>({
     queryKey: ["portfolio", "filters"],
@@ -73,12 +75,15 @@ export default function PortfolioDialog({ open, onClose, onSaved }: Props) {
   const [thumbnailFile, setThumbnailFile] = React.useState<File | null>(null);
   const [thumbnailUrl, setThumbnailUrl] = React.useState("");
   const [isSaving, setIsSaving] = React.useState(false);
+  const [existingAttachments, setExistingAttachments] = React.useState<PortfolioItem["attachments"]>([]);
 
   const preview = useFilePreview(files[0] ?? null);
   const thumbnailPreview = useFilePreview(thumbnailFile);
 
   React.useEffect(() => {
-    if (!open) {
+    if (!open) return;
+
+    if (!item) {
       setTitle("");
       setStyle("");
       setMasterId(undefined);
@@ -88,9 +93,34 @@ export default function PortfolioDialog({ open, onClose, onSaved }: Props) {
       setThumbnailFile(null);
       setThumbnailUrl("");
       setDescription("");
+      setExistingAttachments([]);
       setIsSaving(false);
+      return;
     }
-  }, [open]);
+
+    setTitle(item.title || "");
+    setStyle(item.style || "");
+    setMasterId(item.masterId || undefined);
+    setMediaType((item.mediaType as "image" | "video") || "image");
+    setFiles([]);
+    setUrl(item.url || "");
+    setThumbnailFile(null);
+    setThumbnailUrl(item.thumbnail || "");
+    setDescription(item.description || "");
+    setIsSaving(false);
+
+    const baseAttachment = {
+      url: item.url,
+      mediaType: item.mediaType ?? "image",
+      thumbnail: item.thumbnail ?? null,
+    };
+    const attachments = (item.attachments?.length ? item.attachments : [baseAttachment]).filter(Boolean) as any[];
+    setExistingAttachments(
+      attachments.filter(
+        (att, idx, arr) => idx === arr.findIndex((x) => x.url === att.url && (x.mediaType ?? "image") === (att.mediaType ?? "image")),
+      ),
+    );
+  }, [item, open]);
 
   React.useEffect(() => {
     if (mediaType === "image") {
@@ -143,7 +173,7 @@ export default function PortfolioDialog({ open, onClose, onSaved }: Props) {
         url: string;
         mediaType: "image" | "video";
         thumbnail?: string | null;
-      }[] = [];
+      }[] = [...(existingAttachments || [])];
 
       if (files.length > 0) {
         for (const file of files) {
@@ -177,18 +207,32 @@ export default function PortfolioDialog({ open, onClose, onSaved }: Props) {
         throw new Error("Не удалось получить URL медиа");
       }
 
-      await api.addPortfolioItem({
-        url: uniqueAttachments[0].url,
-        title: finalTitle,
-        description: finalDescription,
-        masterId,
-        style: sanitize(style) || undefined,
-        mediaType: uniqueAttachments[0].mediaType,
-        thumbnail: uniqueAttachments[0].mediaType === "video" ? uniqueAttachments[0].thumbnail : undefined,
-        attachments: uniqueAttachments,
-      });
+      if (item?.id) {
+        await api.updatePortfolioItem(item.id, {
+          url: uniqueAttachments[0].url,
+          title: finalTitle,
+          description: finalDescription,
+          masterId,
+          style: sanitize(style) || undefined,
+          mediaType: uniqueAttachments[0].mediaType,
+          thumbnail: uniqueAttachments[0].mediaType === "video" ? uniqueAttachments[0].thumbnail : undefined,
+          attachments: uniqueAttachments,
+        });
+        toast({ title: "Сохранено", description: "Работа обновлена" });
+      } else {
+        await api.addPortfolioItem({
+          url: uniqueAttachments[0].url,
+          title: finalTitle,
+          description: finalDescription,
+          masterId,
+          style: sanitize(style) || undefined,
+          mediaType: uniqueAttachments[0].mediaType,
+          thumbnail: uniqueAttachments[0].mediaType === "video" ? uniqueAttachments[0].thumbnail : undefined,
+          attachments: uniqueAttachments,
+        });
+        toast({ title: "Готово", description: "Работа добавлена в портфолио" });
+      }
 
-      toast({ title: "Готово", description: "Работа добавлена в портфолио" });
       onSaved();
       onClose();
     } catch (error: any) {
@@ -206,7 +250,7 @@ export default function PortfolioDialog({ open, onClose, onSaved }: Props) {
     <Dialog open={open} onOpenChange={(next) => (!next ? onClose() : null)}>
       <DialogContent className="w-[98vw] max-w-4xl md:max-w-5xl max-h-[90vh] overflow-y-auto border-white/10 bg-[#12151d] text-white">
         <DialogHeader className="space-y-1">
-          <DialogTitle>Добавить работу</DialogTitle>
+          <DialogTitle>{item ? "Редактировать работу" : "Добавить работу"}</DialogTitle>
           <DialogDescription className="text-xs text-white/60">
             Загружайте изображения или видео, указывайте мастера и стиль — бот и сайт подхватят изменения автоматически.
           </DialogDescription>
@@ -254,6 +298,40 @@ export default function PortfolioDialog({ open, onClose, onSaved }: Props) {
               </Select>
             </div>
           </div>
+
+          {existingAttachments?.length ? (
+            <div className="space-y-2">
+              <Label>Текущие медиа</Label>
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
+                {existingAttachments.map((media, idx) => (
+                  <div
+                    key={`${media.url}-${idx}`}
+                    className="relative overflow-hidden rounded-lg border border-white/10 bg-white/5"
+                  >
+                    <img
+                      src={(media.mediaType ?? "image") === "video" ? media.thumbnail || media.url : media.url}
+                      alt="attachment"
+                      className="h-28 w-full object-cover"
+                    />
+                    <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-black/50 px-2 py-1 text-[11px] text-white/80">
+                      <span>{(media.mediaType ?? "image") === "video" ? "Видео" : "Фото"}</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-white/70 hover:bg-red-500/20 hover:text-red-200"
+                        onClick={() =>
+                          setExistingAttachments((prev) => prev.filter((_, inner) => inner !== idx))
+                        }
+                      >
+                        <span className="text-lg leading-none">×</span>
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           {/* === Select мастер === */}
           <div className="grid gap-4 md:grid-cols-2">

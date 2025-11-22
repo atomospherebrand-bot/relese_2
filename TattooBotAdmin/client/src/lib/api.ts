@@ -412,6 +412,46 @@ export const api = {
     return item;
   },
 
+  async updatePortfolioItem(
+    id: string,
+    payload: Partial<{
+      url: string;
+      title: string;
+      description?: string;
+      masterId?: string;
+      style?: string;
+      mediaType?: "image" | "video";
+      thumbnail?: string | null;
+      attachments?: {
+        url: string;
+        mediaType?: "image" | "video";
+        thumbnail?: string | null;
+      }[];
+    }>,
+  ): Promise<PortfolioItem> {
+    const body = portfolioItemSchema
+      .partial()
+      .extend({ thumbnail: portfolioItemSchema.shape.thumbnail })
+      .parse({
+        ...payload,
+        style: sanitizeString(payload.style) ?? undefined,
+        description: sanitizeString(payload.description) ?? undefined,
+        masterId: payload.masterId ?? undefined,
+        thumbnail: sanitizeString(payload.thumbnail ?? undefined) ?? undefined,
+        attachments: payload.attachments?.map((item) => ({
+          url: item.url,
+          mediaType: item.mediaType ?? "image",
+          thumbnail: sanitizeString(item.thumbnail ?? undefined) ?? undefined,
+        })),
+      });
+
+    const { item } = await request<{ item: PortfolioItem }>(`/portfolio/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+    return item;
+  },
+
   async deletePortfolioItem(id: string): Promise<void> {
     await request<void>(`/portfolio/${id}`, { method: "DELETE" });
   },

@@ -914,16 +914,16 @@ def safe_send_media_group(bot, chat_id, media_list):
         for idx, m in enumerate(batch):
             try:
                 url = m.get("url")
-                caption = m.get("caption") if idx == 0 else None  # оставляем подпись только у первого
-                t = m.get("type")
-                r = requests.get(url, timeout=15, headers={"Authorization": f"Basic {auth_header}"})
-                r.raise_for_status()
-                log.debug(f"Media for group: url={url}, size={len(r.content)}, type={r.headers.get('Content-Type')}")
-                content = io.BytesIO(r.content)
+                if not url:
+                    continue
+                caption = (m.get("caption") or "").strip()
+                caption = caption if idx == 0 else None  # оставляем подпись только у первого
+                t = (m.get("type") or m.get("mediaType") or "image").lower()
+                # отправляем по прямым ссылкам, чтобы не дублировать загрузку и избежать повреждения буфера
                 if t == "video":
-                    group.append(_IMV(media=InputFile(content, filename="video.mp4"), caption=caption))
+                    group.append(_IMV(media=url, caption=caption))
                 else:
-                    group.append(_IMP(media=InputFile(content, filename="photo.png"), caption=caption))
+                    group.append(_IMP(media=url, caption=caption))
             except Exception as e:
                 log.warning(f"skip media {m.get('url')}: {e}")
         if not group:
@@ -936,9 +936,9 @@ def safe_send_media_group(bot, chat_id, media_list):
             for item in group:
                 try:
                     if isinstance(item, _IMV):
-                        bot.send_video(chat_id=chat_id, video=item.media, caption=item.caption, supports_streaming=True)
+                        bot.send_video(chat_id=chat_id, video=item.media, caption=getattr(item, "caption", None), supports_streaming=True)
                     else:
-                        bot.send_photo(chat_id=chat_id, photo=item.media, caption=item.caption)
+                        bot.send_photo(chat_id=chat_id, photo=item.media, caption=getattr(item, "caption", None))
                 except Exception as ie:
                     log.warning(f"individual media send failed: {ie}")
 

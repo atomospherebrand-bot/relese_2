@@ -35,6 +35,22 @@ export default function SchedulePage() {
   const defaultsRef = React.useRef({ start: "10:00", end: "20:00" });
   const [err, setErr] = React.useState<string | null>(null);
 
+  const applyUpdate = React.useCallback(
+    (updates: Record<string, DayCfg>) => {
+      setMap((prev) => ({ ...prev, ...updates }));
+      if (!selectedMaster) return;
+      setErr(null);
+      jpost<{ days: Record<string, DayCfg> }>(`/masters/${selectedMaster}/availability`, { update: updates, ym })
+        .then((response) => {
+          if (response?.days) {
+            setMap((prev) => ({ ...prev, ...response.days }));
+          }
+        })
+        .catch((e) => setErr(String(e)));
+    },
+    [selectedMaster, ym],
+  );
+
   React.useEffect(() => {
     jget<{masters: Master[]}>("/masters").then(d => {
       setMasters(d.masters || []);
@@ -91,22 +107,6 @@ export default function SchedulePage() {
     while (arr.length < rows) arr.push(null);
     return arr;
   }, [month]);
-
-  const applyUpdate = React.useCallback(
-    (updates: Record<string, DayCfg>) => {
-      setMap((prev) => ({ ...prev, ...updates }));
-      if (!selectedMaster) return;
-      setErr(null);
-      jpost<{ days: Record<string, DayCfg> }>(`/masters/${selectedMaster}/availability`, { update: updates, ym })
-        .then((response) => {
-          if (response?.days) {
-            setMap((prev) => ({ ...prev, ...response.days }));
-          }
-        })
-        .catch((e) => setErr(String(e)));
-    },
-    [selectedMaster, ym],
-  );
 
   const toggleDay = (d: Date) => {
     const k = dayKey(d);
