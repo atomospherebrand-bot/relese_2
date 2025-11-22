@@ -29,6 +29,31 @@ const createSchema = z.object({
       (value) => !value || value.startsWith("http://") || value.startsWith("https://") || value.startsWith("/uploads/"),
       "Invalid thumbnail",
     ),
+  attachments: z
+    .array(
+      z.object({
+        url: z
+          .string()
+          .min(1)
+          .refine(
+            (value) =>
+              value.startsWith("http://") || value.startsWith("https://") || value.startsWith("/uploads/"),
+            "Invalid url",
+          ),
+        mediaType: z.enum(["image", "video"]).default("image"),
+        thumbnail: z
+          .string()
+          .optional()
+          .nullable()
+          .refine(
+            (value) =>
+              !value || value.startsWith("http://") || value.startsWith("https://") || value.startsWith("/uploads/"),
+            "Invalid thumbnail",
+          ),
+      }),
+    )
+    .default([])
+    .optional(),
 });
 
 router.get("/", async (req, res, next) => {
@@ -63,6 +88,7 @@ router.get("/", async (req, res, next) => {
         style: portfolioTable.style,
         mediaType: portfolioTable.mediaType,
         thumbnail: portfolioTable.thumbnail,
+        attachments: portfolioTable.attachments,
         createdAt: portfolioTable.createdAt,
         masterName: mastersTable.nickname,
         masterFullName: mastersTable.name,
@@ -79,18 +105,31 @@ router.get("/", async (req, res, next) => {
     const [{ count }] = await countQuery.execute();
     const items = await dataQuery.execute();
 
-    const portfolio = items.map((item) => ({
-      id: item.id,
-      url: item.url,
-      title: item.title,
-      description: item.description ?? "",
-      masterId: item.masterId,
-      style: item.style,
-      mediaType: item.mediaType,
-      thumbnail: item.thumbnail,
-      createdAt: item.createdAt,
-      masterName: item.masterName || item.masterFullName,
-    }));
+    const portfolio = items.map((item) => {
+      let attachments: unknown[] = [];
+      try {
+        if (Array.isArray(item.attachments)) attachments = item.attachments as any[];
+        else if (typeof (item as any).attachments === "string") {
+          attachments = JSON.parse((item as any).attachments as string);
+        }
+      } catch {
+        attachments = [];
+      }
+
+      return {
+        id: item.id,
+        url: item.url,
+        title: item.title,
+        description: item.description ?? "",
+        masterId: item.masterId,
+        style: item.style,
+        mediaType: item.mediaType,
+        thumbnail: item.thumbnail,
+        attachments,
+        createdAt: item.createdAt,
+        masterName: item.masterName || item.masterFullName,
+      };
+    });
 
     res.json({
       portfolio,
@@ -122,6 +161,7 @@ router.post("/", async (req, res, next) => {
         style: body.style ? body.style.trim() : null,
         mediaType: body.mediaType ?? "image",
         thumbnail: body.thumbnail ?? null,
+        attachments: body.attachments ?? [],
       })
       .returning();
 

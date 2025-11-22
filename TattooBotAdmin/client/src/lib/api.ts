@@ -383,6 +383,11 @@ export const api = {
     style?: string;
     mediaType?: "image" | "video";
     thumbnail?: string | null;
+    attachments?: {
+      url: string;
+      mediaType?: "image" | "video";
+      thumbnail?: string | null;
+    }[];
   }): Promise<PortfolioItem> {
     const body = portfolioItemSchema
       .omit({ id: true, createdAt: true })
@@ -393,6 +398,11 @@ export const api = {
         description: sanitizeString(payload.description) ?? undefined,
         masterId: payload.masterId ?? undefined,
         thumbnail: sanitizeString(payload.thumbnail ?? undefined) ?? undefined,
+        attachments: payload.attachments?.map((item) => ({
+          url: item.url,
+          mediaType: item.mediaType ?? "image",
+          thumbnail: sanitizeString(item.thumbnail ?? undefined) ?? undefined,
+        })),
       });
 
     const { item } = await request<{ item: PortfolioItem }>(`/portfolio`, {

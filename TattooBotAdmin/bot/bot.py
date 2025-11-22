@@ -346,15 +346,17 @@ def safe_get_portfolio():
                 "masterId": p.get("masterId"),
                 "style": p.get("style") or "",
                 "thumbnail": p.get("thumbnail"),
+                "attachments": p.get("attachments") or [],
             })
         return out
     except Exception as e:
         log.warning("portfolio fetch failed: %s", e)
         return []
 
-def safe_get_masters():
+def safe_get_masters(include_inactive: bool = False):
     try:
-        data = api_get("/api/masters")
+        path = "/api/masters" if not include_inactive else "/api/masters?includeInactive=true"
+        data = api_get(path)
         items = data.get("masters", []) if isinstance(data, dict) else []
         out = []
         for m in items:
@@ -367,7 +369,7 @@ def safe_get_masters():
                 "avatar": m.get("avatar") or "",
                 "teletypeUrl": build_full_url(m.get("teletypeUrl")) or "",
                 "isActive": bool(m.get("isActive", m.get("active", True))),
-            })
+        })
         return out
     except Exception as e:
         log.warning("masters fetch failed: %s", e)
@@ -1024,7 +1026,7 @@ def btn(update, ctx: CallbackContext):
 
     if data == "about":
         s = safe_get_settings()
-        masters = safe_get_masters()
+        masters = safe_get_masters(include_inactive=True)
         if not masters:
             edit_or_send_new(q, "Пока нет мастеров.", reply_markup=kb_back_home())
             return
@@ -1082,7 +1084,7 @@ def btn(update, ctx: CallbackContext):
 
     if data.startswith("portfolio:"):
         master_id = data.split(":", 1)[1]
-        masters = {m["id"]: m for m in safe_get_masters()}
+        masters = {m["id"]: m for m in safe_get_masters(include_inactive=True)}
         master = masters.get(master_id, {})
         portfolio = safe_get_portfolio()
         master_works = [p for p in portfolio if p.get("masterId") == master_id]
@@ -1125,24 +1127,48 @@ def btn(update, ctx: CallbackContext):
         chat_id = q.message.chat_id
         sent_count = 0
         for work in master_works[:5]:
+            media_items = work.get("attachments") or []
             if work.get("url"):
-                full_url = build_full_url(work.get("url"))
-                log.debug(f"Processing media for {work.get('title')}: url={full_url}, type={work.get('mediaType','image')}")
-                try:
-                    r_head = requests.head(full_url, timeout=5, headers={"Authorization": f"Basic {auth_header}"})
-                    log.debug(f"Media HEAD response: status={r_head.status_code}, content-type={r_head.headers.get('Content-Type')}")
-                    r = requests.get(full_url, timeout=15, headers={"Authorization": f"Basic {auth_header}"})
-                    r.raise_for_status()
-                    log.debug(f"Media GET: size={len(r.content)}, type={r.headers.get('Content-Type')}")
-                    buf = io.BytesIO(r.content)
-                    caption = work.get("description") or work.get("title") or selected_style
-                    if work.get("mediaType") == "video":
-                        safe_send_video(bot, chat_id, full_url, caption=caption)
-                    else:
-                        safe_send_photo(bot, chat_id, full_url, caption=caption)
+                media_items = [{
+                    "url": build_full_url(work.get("url")),
+                    "type": work.get("mediaType") or "image",
+                    "caption": work.get("description") or work.get("title") or selected_style,
+                }, *media_items]
+
+            sanitized_media = []
+            for item in media_items:
+                url = item.get("url")
+                if not url:
+                    continue
+                sanitized_media.append({
+                    "url": build_full_url(url),
+                    "type": item.get("mediaType") or item.get("type") or "image",
+                    "caption": item.get("caption") or work.get("description") or work.get("title") or selected_style,
+                })
+
+            if not sanitized_media:
+                continue
+
+            unique_media = []
+            for item in sanitized_media:
+                if any(existing.get("url") == item.get("url") for existing in unique_media):
+                    continue
+                unique_media.append(item)
+
+            try:
+                if len(unique_media) > 1:
+                    safe_send_media_group(bot, chat_id, unique_media)
                     sent_count += 1
-                except Exception as e:
-                    log.warning(f"failed to load or send media {full_url}: {e}")
+                else:
+                    single = unique_media[0]
+                    caption = single.get("caption")
+                    if (single.get("type") or "image") == "video":
+                        safe_send_video(bot, chat_id, single.get("url"), caption=caption)
+                    else:
+                        safe_send_photo(bot, chat_id, single.get("url"), caption=caption)
+                    sent_count += 1
+            except Exception as e:
+                log.warning(f"failed to load or send media {unique_media[0].get('url')}: {e}")
 
         if sent_count > 0:
             q.message.reply_text("Работы мастера", reply_markup=kb_back_home())
@@ -1172,7 +1198,7 @@ def btn(update, ctx: CallbackContext):
                             q.message.chat_id,
                             url,
                             caption=caption,
-                            parse_mode=ParseMode.MARKDOWN,
+                            parse_mode=None,
                             reply_markup=kb_back_home() if sent == 0 else None,
                         )
                     else:
@@ -1181,7 +1207,7 @@ def btn(update, ctx: CallbackContext):
                             q.message.chat_id,
                             url,
                             caption=caption,
-                            parse_mode=ParseMode.MARKDOWN,
+                            parse_mode=None,
                             reply_markup=kb_back_home() if sent == 0 else None,
                         )
                     sent += 1

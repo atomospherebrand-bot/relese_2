@@ -1,6 +1,15 @@
 import { sql } from "drizzle-orm";
 import {
-  boolean, date, integer, pgTable, text, time, timestamp, uuid, varchar,
+  boolean,
+  date,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  time,
+  timestamp,
+  uuid,
+  varchar,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -62,6 +71,12 @@ export const botMessagesTable = pgTable("bot_messages", {
 });
 
 /** PORTFOLIO (images + videos) */
+export type PortfolioMedia = {
+  url: string;
+  mediaType: "image" | "video";
+  thumbnail?: string | null;
+};
+
 export const portfolioTable = pgTable("portfolio_items", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   url: text("url").notNull(),
@@ -71,6 +86,10 @@ export const portfolioTable = pgTable("portfolio_items", {
   style: text("style"),
   mediaType: text("media_type").notNull().default("image"), // 'image' | 'video'
   thumbnail: text("thumbnail"),
+  attachments: jsonb("attachments")
+    .$type<PortfolioMedia[]>()
+    .notNull()
+    .default(sql`'[]'::jsonb`),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
 });
 
@@ -180,6 +199,23 @@ export const portfolioItemSchema = z.object({
     .nullable()
     .refine(v => !v || v.startsWith("http") || v.startsWith("/uploads/"), "Invalid url"),
   description: z.string().default("").optional(),
+  attachments: z
+    .array(
+      z.object({
+        url: z
+          .string()
+          .min(1)
+          .refine(v => v.startsWith("http") || v.startsWith("/uploads/"), "Invalid url"),
+        mediaType: z.enum(["image", "video"]).default("image"),
+        thumbnail: z
+          .string()
+          .optional()
+          .nullable()
+          .refine(v => !v || v.startsWith("http") || v.startsWith("/uploads/"), "Invalid url"),
+      }),
+    )
+    .default([])
+    .optional(),
   createdAt: z.string().optional(),
 });
 

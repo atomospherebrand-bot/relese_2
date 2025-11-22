@@ -705,6 +705,17 @@ export class DatabaseStorage {
   }
 
   private mapPortfolio(row: typeof portfolioTable.$inferSelect): PortfolioItem {
+    const attachments = (() => {
+      const raw = (row as any)?.attachments;
+      if (!raw) return [];
+      try {
+        if (Array.isArray(raw)) return raw as any[];
+        if (typeof raw === "string") return JSON.parse(raw);
+        return [];
+      } catch {
+        return [];
+      }
+    })();
     return portfolioItemSchema.parse({
       id: row.id,
       url: row.url,
@@ -714,6 +725,7 @@ export class DatabaseStorage {
       style: optional(row.style),
       mediaType: (row.mediaType as PortfolioItem["mediaType"]) ?? "image",
       thumbnail: optional(row.thumbnail),
+      attachments,
       createdAt:
         row.createdAt instanceof Date
           ? row.createdAt.toISOString()
@@ -1432,6 +1444,7 @@ try {
         style: validated.style ?? null,
         mediaType: validated.mediaType,
         thumbnail: validated.thumbnail ?? null,
+        attachments: validated.attachments ?? [],
       })
       .returning();
 

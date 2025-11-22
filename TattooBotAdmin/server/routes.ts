@@ -81,7 +81,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       if (!booking) return;
       const settings = await storage.getSettings();
-      const token = (settings as any)?.botToken;
+      const token = (settings as any)?.botToken || process.env.BOT_TOKEN || process.env.TELEGRAM_TOKEN;
       if (!token) { console.warn("[notify] missing botToken"); return; }
 
       const mapFile = path.join(process.cwd(), "data", "notifications.json");

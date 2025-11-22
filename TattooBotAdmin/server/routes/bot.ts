@@ -48,8 +48,8 @@ const botBookingRequestSchema = insertBookingSchema.extend({
 const botClientSchema = z.object({
   telegramId: z.union([z.string(), z.number()]).optional(),
   username: z.string().optional(),
-  firstName: z.string().optional(),
-  lastName: z.string().optional(),
+  firstName: z.string().nullish(),
+  lastName: z.string().nullish(),
   phone: z.string().optional(),
 });
 

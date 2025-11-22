@@ -68,13 +68,13 @@ export default function PortfolioDialog({ open, onClose, onSaved }: Props) {
   const [style, setStyle] = React.useState("");
   const [masterId, setMasterId] = React.useState<string | undefined>(undefined);
   const [mediaType, setMediaType] = React.useState<"image" | "video">("image");
-  const [file, setFile] = React.useState<File | null>(null);
+  const [files, setFiles] = React.useState<File[]>([]);
   const [url, setUrl] = React.useState("");
   const [thumbnailFile, setThumbnailFile] = React.useState<File | null>(null);
   const [thumbnailUrl, setThumbnailUrl] = React.useState("");
   const [isSaving, setIsSaving] = React.useState(false);
 
-  const preview = useFilePreview(file);
+  const preview = useFilePreview(files[0] ?? null);
   const thumbnailPreview = useFilePreview(thumbnailFile);
 
   React.useEffect(() => {
@@ -83,7 +83,7 @@ export default function PortfolioDialog({ open, onClose, onSaved }: Props) {
       setStyle("");
       setMasterId(undefined);
       setMediaType("image");
-      setFile(null);
+      setFiles([]);
       setUrl("");
       setThumbnailFile(null);
       setThumbnailUrl("");
@@ -100,10 +100,11 @@ export default function PortfolioDialog({ open, onClose, onSaved }: Props) {
   }, [mediaType]);
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = event.target.files?.[0];
-    if (!selected) return;
-    setFile(selected);
-    if (selected.type.startsWith("video/")) {
+    const selected = Array.from(event.target.files ?? []);
+    if (selected.length === 0) return;
+    setFiles(selected);
+    const first = selected[0];
+    if (first.type.startsWith("video/")) {
       setMediaType("video");
     } else {
       setMediaType("image");
@@ -127,7 +128,7 @@ export default function PortfolioDialog({ open, onClose, onSaved }: Props) {
     let finalThumbnail = sanitize(thumbnailUrl) || undefined;
     let finalMediaType: "image" | "video" = mediaType;
 
-    if (!finalUrl && !file) {
+    if (!finalUrl && files.length === 0) {
       toast({
         title: "Нет файла",
         description: "Загрузите медиафайл или укажите ссылку",
@@ -138,29 +139,53 @@ export default function PortfolioDialog({ open, onClose, onSaved }: Props) {
 
     setIsSaving(true);
     try {
-      if (file) {
-        const uploadResult = await api.uploadFile(file, {
-          thumbnail: mediaType === "video" ? thumbnailFile ?? null : null,
-        });
-        finalUrl = uploadResult.url;
-        finalMediaType = uploadResult.mediaType;
-        if (uploadResult.thumbnail) {
-          finalThumbnail = uploadResult.thumbnail;
+      const attachments: {
+        url: string;
+        mediaType: "image" | "video";
+        thumbnail?: string | null;
+      }[] = [];
+
+      if (files.length > 0) {
+        for (const file of files) {
+          const uploadResult = await api.uploadFile(file, {
+            thumbnail: file.type.startsWith("video/") ? thumbnailFile ?? null : null,
+          });
+          attachments.push({
+            url: uploadResult.url,
+            mediaType: uploadResult.mediaType,
+            thumbnail: uploadResult.thumbnail ?? null,
+          });
         }
+        finalUrl = attachments[0]?.url || finalUrl;
+        finalMediaType = attachments[0]?.mediaType || finalMediaType;
+        finalThumbnail = attachments[0]?.thumbnail ?? finalThumbnail;
       }
 
-      if (!finalUrl) {
+      if (finalUrl) {
+        attachments.unshift({
+          url: finalUrl,
+          mediaType: finalMediaType,
+          thumbnail: finalThumbnail ?? null,
+        });
+      }
+
+      const uniqueAttachments = attachments.filter(
+        (item, index, arr) => index === arr.findIndex((a) => a.url === item.url),
+      );
+
+      if (uniqueAttachments.length === 0) {
         throw new Error("Не удалось получить URL медиа");
       }
 
       await api.addPortfolioItem({
-        url: finalUrl,
+        url: uniqueAttachments[0].url,
         title: finalTitle,
         description: finalDescription,
         masterId,
         style: sanitize(style) || undefined,
-        mediaType: finalMediaType,
-        thumbnail: finalMediaType === "video" ? finalThumbnail : undefined,
+        mediaType: uniqueAttachments[0].mediaType,
+        thumbnail: uniqueAttachments[0].mediaType === "video" ? uniqueAttachments[0].thumbnail : undefined,
+        attachments: uniqueAttachments,
       });
 
       toast({ title: "Готово", description: "Работа добавлена в портфолио" });
@@ -179,7 +204,7 @@ export default function PortfolioDialog({ open, onClose, onSaved }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(next) => (!next ? onClose() : null)}>
-      <DialogContent className="sm:max-w-xl border-white/10 bg-[#12151d] text-white">
+      <DialogContent className="w-[95vw] max-w-5xl border-white/10 bg-[#12151d] text-white">
         <DialogHeader className="space-y-1">
           <DialogTitle>Добавить работу</DialogTitle>
           <DialogDescription className="text-xs text-white/60">
@@ -273,14 +298,23 @@ export default function PortfolioDialog({ open, onClose, onSaved }: Props) {
           <div className="space-y-3">
             <Label>Файл или ссылка</Label>
             <div className="grid gap-3 md:grid-cols-2">
-              <label className="flex h-32 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-white/20 bg-black/20 text-sm text-white/60 hover:border-white/40">
+              <label className="flex min-h-[140px] cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-white/20 bg-black/20 text-sm text-white/60 hover:border-white/40">
                 <Upload className="mb-2 h-5 w-5" />
-                {file ? "Файл выбран" : "Выберите файл"}
-                <Input type="file" accept="image/*,video/*" className="hidden" onChange={handleFileSelect} />
-                {file && (
-                  <Badge variant="secondary" className="mt-2 max-w-[90%] truncate bg-white/10 text-xs text-white">
-                    {file.name}
-                  </Badge>
+                {files.length > 0 ? "Файлы выбраны" : "Выберите один или несколько файлов"}
+                <Input type="file" multiple accept="image/*,video/*" className="hidden" onChange={handleFileSelect} />
+                {files.length > 0 && (
+                  <div className="mt-2 flex max-h-20 w-full flex-col items-center gap-1 overflow-auto px-3 text-xs text-white">
+                    {files.map((f) => (
+                      <Badge
+                        key={f.name}
+                        variant="secondary"
+                        className="max-w-full truncate bg-white/10 text-white"
+                        title={f.name}
+                      >
+                        {f.name}
+                      </Badge>
+                    ))}
+                  </div>
                 )}
               </label>
 
@@ -292,7 +326,7 @@ export default function PortfolioDialog({ open, onClose, onSaved }: Props) {
                   className="border-white/10 bg-black/20 placeholder:text-white/40"
                 />
                 <p className="text-xs text-white/40">
-                  Если укажете ссылку, файл загружать не нужно. При загрузке файл сохранится в /uploads автоматически.
+                  Можно загрузить несколько файлов сразу или указать ссылку на готовое медиа.
                 </p>
               </div>
             </div>
