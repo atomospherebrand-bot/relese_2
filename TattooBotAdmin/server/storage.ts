@@ -81,10 +81,23 @@ const rawDayConfigSchema = z.object({
 });
 type RawDayConfig = z.infer<typeof rawDayConfigSchema>;
 
-const availabilitySchema = z.record(
-  z.string(),
+const dayDefaultsSchema = z
+  .object({
+    start: z.string().regex(TIME_REGEX).optional(),
+    end: z.string().regex(TIME_REGEX).optional(),
+  })
+  .partial()
+  .optional();
+
+const availabilityRecordSchema = z.union([
+  z.object({
+    defaults: dayDefaultsSchema,
+    days: z.record(z.string().regex(DAY_KEY_REGEX), rawDayConfigSchema).default({}),
+  }),
   z.record(z.string().regex(DAY_KEY_REGEX), rawDayConfigSchema),
-);
+]);
+
+const availabilitySchema = z.record(z.string(), availabilityRecordSchema);
 
 function compareTimes(left: string, right: string): number {
   return left.localeCompare(right, "en");
@@ -571,42 +584,51 @@ export class DatabaseStorage {
     this.writeDataFile(CLIENT_PROFILES_FILE, profiles);
   }
 
-  private readAvailabilityMap(): Record<string, Record<string, DaySchedule>> {
+  private readAvailabilityMap(): Record<string, { defaults?: { start?: string; end?: string }; days: Record<string, DaySchedule> }> {
     const stored = this.readDataFile<unknown>(AVAILABILITY_FILE, {});
     const parsed = availabilitySchema.safeParse(stored);
     if (!parsed.success) {
       return {};
     }
 
-    const result: Record<string, Record<string, DaySchedule>> = {};
-    for (const [masterId, days] of Object.entries(parsed.data)) {
-      result[masterId] = {};
-      for (const [date, cfg] of Object.entries(days)) {
-        result[masterId][date] = normalizeDayConfig(cfg);
+    const result: Record<string, { defaults?: { start?: string; end?: string }; days: Record<string, DaySchedule> }> = {};
+    for (const [masterId, value] of Object.entries(parsed.data)) {
+      const defaults = (value as any)?.defaults as { start?: string; end?: string } | undefined;
+      const dayEntries: Record<string, RawDayConfig> = "days" in (value as any) ? (value as any).days : (value as any);
+      const normalizedDays: Record<string, DaySchedule> = {};
+      for (const [date, cfg] of Object.entries(dayEntries)) {
+        normalizedDays[date] = normalizeDayConfig(cfg as RawDayConfig);
       }
+      result[masterId] = { defaults, days: normalizedDays };
     }
     return result;
   }
 
-  async getMasterAvailability(masterId: string, ym?: string): Promise<Record<string, DaySchedule>> {
+  async getMasterAvailability(masterId: string, ym?: string): Promise<{ days: Record<string, DaySchedule>; defaults?: { start?: string; end?: string } }> {
     await this.ensureReady();
     const availability = this.readAvailabilityMap();
-    const days = availability[masterId] ?? {};
+    const record = availability[masterId] ?? { days: {} };
+    const days = record.days ?? {};
     if (!ym || !MONTH_KEY_REGEX.test(ym)) {
-      return days;
+      return { days, defaults: record.defaults };
     }
     const prefix = `${ym}-`;
-    return Object.fromEntries(Object.entries(days).filter(([date]) => date.startsWith(prefix)));
+    return {
+      days: Object.fromEntries(Object.entries(days).filter(([date]) => date.startsWith(prefix))),
+      defaults: record.defaults,
+    };
   }
 
   async updateMasterAvailability(
     masterId: string,
     updates: Record<string, DaySchedule>,
     ym?: string,
-  ): Promise<Record<string, DaySchedule>> {
+    defaults?: { start?: string; end?: string },
+  ): Promise<{ days: Record<string, DaySchedule>; defaults?: { start?: string; end?: string } }> {
     await this.ensureReady();
     const availability = this.readAvailabilityMap();
-    const current = availability[masterId] ?? {};
+    const current = availability[masterId]?.days ?? {};
+    const defaultHours = availability[masterId]?.defaults ?? {};
 
     for (const [dateKey, value] of Object.entries(updates)) {
       if (!DAY_KEY_REGEX.test(dateKey)) continue;
@@ -618,14 +640,22 @@ export class DatabaseStorage {
       }
     }
 
-    availability[masterId] = current;
+    if (defaults) {
+      if (defaults.start && TIME_REGEX.test(defaults.start)) defaultHours.start = defaults.start;
+      if (defaults.end && TIME_REGEX.test(defaults.end)) defaultHours.end = defaults.end;
+    }
+
+    availability[masterId] = { days: current, defaults: defaultHours };
     this.writeDataFile(AVAILABILITY_FILE, availability);
 
     if (ym && MONTH_KEY_REGEX.test(ym)) {
       const prefix = `${ym}-`;
-      return Object.fromEntries(Object.entries(current).filter(([date]) => date.startsWith(prefix)));
+      return {
+        days: Object.fromEntries(Object.entries(current).filter(([date]) => date.startsWith(prefix))),
+        defaults: defaultHours,
+      };
     }
-    return current;
+    return { days: current, defaults: defaultHours };
   }
 
   private deleteUploadIfLocal(url?: string | null) {
@@ -1635,12 +1665,12 @@ try {
 
     // read per-day availability
     const monthKey = date.slice(0,7);
-    const dayMap = await this.getMasterAvailability(masterId, monthKey);
+    const { days: dayMap, defaults } = await this.getMasterAvailability(masterId, monthKey);
     const dayCfg = dayMap[date];
     if (!dayCfg || dayCfg.isWorking === false) return [];
 
-    const workStart = (dayCfg?.start || "10:00");
-    const workEnd   = (dayCfg?.end   || "22:00");
+    const workStart = dayCfg?.start || defaults?.start || "10:00";
+    const workEnd   = dayCfg?.end   || defaults?.end   || "22:00";
 
     const conditions = [
       eq(bookingsTable.masterId, masterId),

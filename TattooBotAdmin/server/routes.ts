@@ -161,8 +161,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     asyncHandler(async (req, res) => {
       const { id } = req.params;
       const { ym } = z.object({ ym: z.string().regex(/^\d{4}-\d{2}$/).optional() }).parse(req.query);
-      const days = await storage.getMasterAvailability(id, ym);
-      res.json({ days });
+      const { days, defaults } = await storage.getMasterAvailability(id, ym);
+      res.json({ days, defaults });
     }),
   );
 
@@ -174,10 +174,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .object({
           ym: z.string().regex(/^\d{4}-\d{2}$/).optional(),
           update: z.record(z.string().regex(/^\d{4}-\d{2}-\d{2}$/), dayConfigSchema),
+          defaults: z
+            .object({ start: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(), end: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional() })
+            .partial()
+            .optional(),
         })
         .parse(req.body ?? {});
-      const days = await storage.updateMasterAvailability(id, payload.update, payload.ym);
-      res.json({ days });
+      const { days, defaults } = await storage.updateMasterAvailability(id, payload.update, payload.ym, payload.defaults);
+      res.json({ days, defaults });
     }),
   );
 

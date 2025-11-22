@@ -1,5 +1,6 @@
 import os, logging, requests, random, time, re
 import io
+from io import BytesIO
 from datetime import datetime, timedelta, time as dtime, date
 from dateutil import tz
 from telegram import (
@@ -9,6 +10,7 @@ from telegram.ext import (
     Updater, CommandHandler, CallbackQueryHandler, ConversationHandler,
     MessageHandler, Filters, CallbackContext
 )
+from captcha.image import ImageCaptcha
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("tattoo-bot")
@@ -283,19 +285,40 @@ def register_client_profile(user):
         log.debug("register client profile failed: %s", e)
 
 
-def start_captcha_for_user(target, uid):
-    a, b = random.randint(1, 9), random.randint(1, 9)
-    captcha[uid] = (a, b)
-    prompt = render_bot_text(
+def generate_captcha_code():
+    # исключаем похожие символы
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    return "".join(random.choice(alphabet) for _ in range(5))
+
+
+def send_captcha_image(target, uid):
+    code = generate_captcha_code()
+    captcha_codes[uid] = code
+    img = ImageCaptcha(width=260, height=120)
+    buffer = BytesIO()
+    img.write(code, buffer)
+    buffer.seek(0)
+
+    caption = bot_text(
         "captcha_prompt",
-        f"Для защиты от спама решите пример: {a}+{b} = ?",
-        {"a": str(a), "b": str(b)},
+        "Введите код с картинки, чтобы продолжить",
     )
+
     if getattr(target, "message", None):
-        target.message.reply_text(prompt, parse_mode=ParseMode.MARKDOWN)
+        target.message.reply_photo(
+            photo=InputFile(buffer, filename="captcha.png"),
+            caption=caption,
+        )
     else:
-        target.callback_query.message.reply_text(prompt, parse_mode=ParseMode.MARKDOWN)
+        target.callback_query.message.reply_photo(
+            photo=InputFile(buffer, filename="captcha.png"),
+            caption=caption,
+        )
     return S_CAPTCHA
+
+
+def start_captcha_for_user(target, uid):
+    return send_captcha_image(target, uid)
 
 
 def send_terms_and_captcha(target, uid):
@@ -502,6 +525,8 @@ def notify_register_chat(booking_id: str, chat_id: int) -> None:
 
 verified = set()
 captcha = {}
+participants = {}
+captcha_codes = {}
 
 # ===== /start + captcha =====
 def cmd_start(update, ctx: CallbackContext):
@@ -534,13 +559,17 @@ def on_captcha(update, ctx: CallbackContext):
     uid = update.effective_user.id
     register_client_profile(update.effective_user)
     ans = update.message.text.strip()
-    a,b = captcha.get(uid,(None,None))
-    if a is None: return ConversationHandler.END
-    if ans.isdigit() and int(ans)==a+b:
-        verified.add(uid); captcha.pop(uid,None)
+    expected = captcha_codes.get(uid)
+    if not expected:
+        return send_terms_and_captcha(update, uid)
+
+    if ans and ans.strip().upper() == expected.upper():
+        verified.add(uid)
+        captcha_codes.pop(uid, None)
         send_home_text(update, ctx)
         return ConversationHandler.END
-    update.message.reply_text(bot_text("captcha_wrong", "Неа. Пришли число ещё раз."))
+
+    update.message.reply_text(bot_text("captcha_wrong", "Неа. Пришли код ещё раз."))
     return S_CAPTCHA
 
 
@@ -907,7 +936,11 @@ def safe_send_video(bot, chat_id, video_url, caption=None, reply_markup=None, pa
 def safe_send_media_group(bot, chat_id, media_list):
     from telegram import InputMediaPhoto as _IMP, InputMediaVideo as _IMV
 
-    # Telegram ограничивает sendMediaGroup до 10 элементов, поэтому режем батчами
+    def fetch_media(url: str, filename: str):
+        r = requests.get(url, timeout=15, headers={"Authorization": f"Basic {auth_header}"})
+        r.raise_for_status()
+        return InputFile(io.BytesIO(r.content), filename=filename)
+
     batches = [media_list[i : i + 10] for i in range(0, len(media_list or []), 10)]
     for batch in batches:
         group = []
@@ -917,13 +950,14 @@ def safe_send_media_group(bot, chat_id, media_list):
                 if not url:
                     continue
                 caption = (m.get("caption") or "").strip()
-                caption = caption if idx == 0 else None  # оставляем подпись только у первого
+                caption = caption if idx == 0 else None
                 t = (m.get("type") or m.get("mediaType") or "image").lower()
-                # отправляем по прямым ссылкам, чтобы не дублировать загрузку и избежать повреждения буфера
+                filename = "video.mp4" if t == "video" else "photo.png"
+                media_file = fetch_media(url, filename)
                 if t == "video":
-                    group.append(_IMV(media=url, caption=caption))
+                    group.append(_IMV(media=media_file, caption=caption))
                 else:
-                    group.append(_IMP(media=url, caption=caption))
+                    group.append(_IMP(media=media_file, caption=caption))
             except Exception as e:
                 log.warning(f"skip media {m.get('url')}: {e}")
         if not group:
@@ -932,13 +966,13 @@ def safe_send_media_group(bot, chat_id, media_list):
             bot.send_media_group(chat_id=chat_id, media=group)
         except Exception as e:
             log.warning(f"media group send failed: {e}")
-            # fallback to individual sends
             for item in group:
                 try:
+                    caption = getattr(item, "caption", None)
                     if isinstance(item, _IMV):
-                        bot.send_video(chat_id=chat_id, video=item.media, caption=getattr(item, "caption", None), supports_streaming=True)
+                        bot.send_video(chat_id=chat_id, video=item.media, caption=caption, supports_streaming=True)
                     else:
-                        bot.send_photo(chat_id=chat_id, photo=item.media, caption=getattr(item, "caption", None))
+                        bot.send_photo(chat_id=chat_id, photo=item.media, caption=caption)
                 except Exception as ie:
                     log.warning(f"individual media send failed: {ie}")
 

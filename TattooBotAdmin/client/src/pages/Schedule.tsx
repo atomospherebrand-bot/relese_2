@@ -40,11 +40,16 @@ export default function SchedulePage() {
       setMap((prev) => ({ ...prev, ...updates }));
       if (!selectedMaster) return;
       setErr(null);
-      jpost<{ days: Record<string, DayCfg> }>(`/masters/${selectedMaster}/availability`, { update: updates, ym })
+      jpost<{ days: Record<string, DayCfg>; defaults?: { start?: string; end?: string } }>(
+        `/masters/${selectedMaster}/availability`,
+        { update: updates, ym, defaults: defaultsRef.current },
+      )
         .then((response) => {
           if (response?.days) {
             setMap((prev) => ({ ...prev, ...response.days }));
           }
+          if (response?.defaults?.start) setDefStart(response.defaults.start);
+          if (response?.defaults?.end) setDefEnd(response.defaults.end);
         })
         .catch((e) => setErr(String(e)));
     },
@@ -63,8 +68,16 @@ export default function SchedulePage() {
     setMap({});
     setErr(null);
     if (!selectedMaster) return;
-    jget<{days: Record<string, DayCfg>}>(`/masters/${selectedMaster}/availability?ym=${ym}`)
-      .then((d) => setMap(d.days || {}))
+    jget<{days: Record<string, DayCfg>; defaults?: { start?: string; end?: string } }>(`/masters/${selectedMaster}/availability?ym=${ym}`)
+      .then((d) => {
+        setMap(d.days || {});
+        if (d.defaults?.start) setDefStart(d.defaults.start);
+        if (d.defaults?.end) setDefEnd(d.defaults.end);
+        defaultsRef.current = {
+          start: d.defaults?.start || defaultsRef.current.start,
+          end: d.defaults?.end || defaultsRef.current.end,
+        };
+      })
       .catch((e) => setErr(String(e)));
   }, [selectedMaster, ym]);
 
@@ -90,6 +103,9 @@ export default function SchedulePage() {
 
     if (Object.keys(updates).length > 0) {
       applyUpdate(updates);
+    } else if (defaultsRef.current.start !== defStart || defaultsRef.current.end !== defEnd) {
+      // прогоняем пустое обновление, чтобы зафиксировать дефолтные часы
+      applyUpdate({});
     }
 
     defaultsRef.current = { start: defStart, end: defEnd };
