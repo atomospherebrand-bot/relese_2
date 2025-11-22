@@ -100,6 +100,7 @@ export async function runMigrations(db: NodePgDatabase<any>): Promise<void> {
       id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
       url text NOT NULL,
       title text NOT NULL,
+      description text NOT NULL DEFAULT '',
       master_id uuid REFERENCES masters(id) ON DELETE SET NULL,
       style text,
       media_type text NOT NULL DEFAULT 'image' CHECK (media_type IN ('image','video')),
@@ -178,6 +179,10 @@ export async function runMigrations(db: NodePgDatabase<any>): Promise<void> {
   await addColumnIfMissing(db, "portfolio_items", "media_type", '"media_type" text');
   await addColumnIfMissing(db, "portfolio_items", "thumbnail", '"thumbnail" text');
   await addColumnIfMissing(db, "portfolio_items", "created_at", '"created_at" timestamptz');
+  await addColumnIfMissing(db, "portfolio_items", "description", '"description" text DEFAULT \'\''');
+  await db.execute(sql`UPDATE portfolio_items SET description = '' WHERE description IS NULL;`);
+  await db.execute(sql`ALTER TABLE portfolio_items ALTER COLUMN description SET DEFAULT '';`);
+  await db.execute(sql`ALTER TABLE portfolio_items ALTER COLUMN description SET NOT NULL;`);
   await addColumnIfMissing(db, "portfolio_items", "image_url", '"image_url" text DEFAULT \'\'');
   await db.execute(sql`UPDATE portfolio_items SET image_url = '' WHERE image_url IS NULL;`);
   await db.execute(sql`ALTER TABLE portfolio_items ALTER COLUMN image_url SET DEFAULT '';`);
