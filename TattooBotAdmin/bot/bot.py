@@ -906,23 +906,28 @@ def safe_send_video(bot, chat_id, video_url, caption=None, reply_markup=None, pa
 
 def safe_send_media_group(bot, chat_id, media_list):
     from telegram import InputMediaPhoto as _IMP, InputMediaVideo as _IMV
-    group = []
-    for m in media_list:
-        try:
-            url = m.get("url")
-            caption = m.get("caption")
-            t = m.get("type")
-            r = requests.get(url, timeout=15, headers={"Authorization": f"Basic {auth_header}"})
-            r.raise_for_status()
-            log.debug(f"Media for group: url={url}, size={len(r.content)}, type={r.headers.get('Content-Type')}")
-            content = io.BytesIO(r.content)
-            if t == "video":
-                group.append(_IMV(media=InputFile(content, filename="video.mp4"), caption=caption))
-            else:
-                group.append(_IMP(media=InputFile(content, filename="photo.png"), caption=caption))
-        except Exception as e:
-            log.warning(f"skip media {m.get('url')}: {e}")
-    if group:
+
+    # Telegram ограничивает sendMediaGroup до 10 элементов, поэтому режем батчами
+    batches = [media_list[i : i + 10] for i in range(0, len(media_list or []), 10)]
+    for batch in batches:
+        group = []
+        for idx, m in enumerate(batch):
+            try:
+                url = m.get("url")
+                caption = m.get("caption") if idx == 0 else None  # оставляем подпись только у первого
+                t = m.get("type")
+                r = requests.get(url, timeout=15, headers={"Authorization": f"Basic {auth_header}"})
+                r.raise_for_status()
+                log.debug(f"Media for group: url={url}, size={len(r.content)}, type={r.headers.get('Content-Type')}")
+                content = io.BytesIO(r.content)
+                if t == "video":
+                    group.append(_IMV(media=InputFile(content, filename="video.mp4"), caption=caption))
+                else:
+                    group.append(_IMP(media=InputFile(content, filename="photo.png"), caption=caption))
+            except Exception as e:
+                log.warning(f"skip media {m.get('url')}: {e}")
+        if not group:
+            continue
         try:
             bot.send_media_group(chat_id=chat_id, media=group)
         except Exception as e:

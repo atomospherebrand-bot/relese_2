@@ -204,7 +204,7 @@ export default function PortfolioDialog({ open, onClose, onSaved }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(next) => (!next ? onClose() : null)}>
-      <DialogContent className="w-[95vw] max-w-5xl border-white/10 bg-[#12151d] text-white">
+      <DialogContent className="w-[98vw] max-w-4xl md:max-w-5xl max-h-[90vh] overflow-y-auto border-white/10 bg-[#12151d] text-white">
         <DialogHeader className="space-y-1">
           <DialogTitle>Добавить работу</DialogTitle>
           <DialogDescription className="text-xs text-white/60">
@@ -303,12 +303,12 @@ export default function PortfolioDialog({ open, onClose, onSaved }: Props) {
                 {files.length > 0 ? "Файлы выбраны" : "Выберите один или несколько файлов"}
                 <Input type="file" multiple accept="image/*,video/*" className="hidden" onChange={handleFileSelect} />
                 {files.length > 0 && (
-                  <div className="mt-2 flex max-h-20 w-full flex-col items-center gap-1 overflow-auto px-3 text-xs text-white">
+                  <div className="mt-3 grid max-h-24 w-full grid-cols-1 gap-2 overflow-y-auto px-3 text-xs text-white sm:grid-cols-2">
                     {files.map((f) => (
                       <Badge
                         key={f.name}
                         variant="secondary"
-                        className="max-w-full truncate bg-white/10 text-white"
+                        className="flex max-w-full items-center justify-start truncate bg-white/10 text-white"
                         title={f.name}
                       >
                         {f.name}

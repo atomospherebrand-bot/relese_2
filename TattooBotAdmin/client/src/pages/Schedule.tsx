@@ -32,6 +32,7 @@ export default function SchedulePage() {
   const [map, setMap] = React.useState<Record<string, DayCfg>>({});
   const [defStart, setDefStart] = React.useState("10:00");
   const [defEnd, setDefEnd] = React.useState("20:00");
+  const defaultsRef = React.useRef({ start: "10:00", end: "20:00" });
   const [err, setErr] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -50,6 +51,33 @@ export default function SchedulePage() {
       .then((d) => setMap(d.days || {}))
       .catch((e) => setErr(String(e)));
   }, [selectedMaster, ym]);
+
+  React.useEffect(() => {
+    const prev = defaultsRef.current;
+    if (prev.start === defStart && prev.end === defEnd) return;
+
+    const updates: Record<string, DayCfg> = {};
+    Object.entries(map).forEach(([date, cfg]) => {
+      if (!cfg?.isWorking) return;
+      const nextStart = cfg.start?.trim() || defStart;
+      const nextEnd = cfg.end?.trim() || defEnd;
+      const needsUpdate =
+        (!cfg.start && defStart !== prev.start) ||
+        (!cfg.end && defEnd !== prev.end) ||
+        (cfg.start === prev.start && defStart !== prev.start) ||
+        (cfg.end === prev.end && defEnd !== prev.end);
+
+      if (needsUpdate) {
+        updates[date] = { ...cfg, isWorking: true, start: nextStart, end: nextEnd };
+      }
+    });
+
+    if (Object.keys(updates).length > 0) {
+      applyUpdate(updates);
+    }
+
+    defaultsRef.current = { start: defStart, end: defEnd };
+  }, [defStart, defEnd, map, applyUpdate]);
 
   const days: (Date | null)[] = React.useMemo(() => {
     const first = startOfMonth(month);
