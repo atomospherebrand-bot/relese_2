@@ -36,13 +36,14 @@ export default function SchedulePage() {
   const [err, setErr] = React.useState<string | null>(null);
 
   const applyUpdate = React.useCallback(
-    (updates: Record<string, DayCfg>) => {
+    (updates: Record<string, DayCfg>, nextDefaults?: { start: string; end: string }) => {
       setMap((prev) => ({ ...prev, ...updates }));
       if (!selectedMaster) return;
       setErr(null);
+      const defaultsPayload = nextDefaults ?? defaultsRef.current;
       jpost<{ days: Record<string, DayCfg>; defaults?: { start?: string; end?: string } }>(
         `/masters/${selectedMaster}/availability`,
-        { update: updates, ym, defaults: defaultsRef.current },
+        { update: updates, ym, defaults: defaultsPayload },
       )
         .then((response) => {
           if (response?.days) {
@@ -101,14 +102,15 @@ export default function SchedulePage() {
       }
     });
 
-    if (Object.keys(updates).length > 0) {
-      applyUpdate(updates);
-    } else if (defaultsRef.current.start !== defStart || defaultsRef.current.end !== defEnd) {
-      // прогоняем пустое обновление, чтобы зафиксировать дефолтные часы
-      applyUpdate({});
-    }
+    const nextDefaults = { start: defStart, end: defEnd };
+    defaultsRef.current = nextDefaults;
 
-    defaultsRef.current = { start: defStart, end: defEnd };
+    if (Object.keys(updates).length > 0) {
+      applyUpdate(updates, nextDefaults);
+    } else if (prev.start !== defStart || prev.end !== defEnd) {
+      // прогоняем пустое обновление, чтобы зафиксировать дефолтные часы
+      applyUpdate({}, nextDefaults);
+    }
   }, [defStart, defEnd, map, applyUpdate]);
 
   const days: (Date | null)[] = React.useMemo(() => {

@@ -301,7 +301,7 @@ def send_captcha_image(target, uid):
 
     caption = bot_text(
         "captcha_prompt",
-        "Введите код с картинки, чтобы продолжить",
+        "Вводя код с картинки, вы подтверждаете, что согласны с условиями использования и политикой конфиденциальности, указанными выше.",
     )
 
     if getattr(target, "message", None):
@@ -531,20 +531,12 @@ captcha_codes = {}
 # ===== /start + captcha =====
 def cmd_start(update, ctx: CallbackContext):
     register_client_profile(update.effective_user)
-    start_text = bot_text(
-        "start_intro",
-        "👋 Привет! Готовы записаться? Нажмите Старт, чтобы подтвердить условия и продолжить.",
-    )
-    button_title = bot_text("button_start", "▶️ Старт")
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton(button_title, callback_data="start_bot")]])
-    if update.message:
-        update.message.reply_text(
-            start_text,
-            parse_mode=ParseMode.MARKDOWN,
-            disable_web_page_preview=True,
-            reply_markup=kb,
-        )
-    return ConversationHandler.END
+    uid = update.effective_user.id
+    if uid in verified:
+        send_home_text(update, ctx)
+        return ConversationHandler.END
+
+    return send_terms_and_captcha(update, uid)
 
 def on_start_button(update, ctx: CallbackContext):
     q = update.callback_query; q.answer()
@@ -569,7 +561,7 @@ def on_captcha(update, ctx: CallbackContext):
         send_home_text(update, ctx)
         return ConversationHandler.END
 
-    update.message.reply_text(bot_text("captcha_wrong", "Неа. Пришли код ещё раз."))
+    update.message.reply_text(bot_text("captcha_wrong", "Попробуйте пожалуйста снова ввести капчу"))
     return S_CAPTCHA
 
 
@@ -936,14 +928,15 @@ def safe_send_video(bot, chat_id, video_url, caption=None, reply_markup=None, pa
 def safe_send_media_group(bot, chat_id, media_list):
     from telegram import InputMediaPhoto as _IMP, InputMediaVideo as _IMV
 
-    def fetch_media(url: str, filename: str):
+    def fetch_bytes(url: str):
         r = requests.get(url, timeout=15, headers={"Authorization": f"Basic {auth_header}"})
         r.raise_for_status()
-        return InputFile(io.BytesIO(r.content), filename=filename)
+        return r.content
 
     batches = [media_list[i : i + 10] for i in range(0, len(media_list or []), 10)]
     for batch in batches:
         group = []
+        prepared = []
         for idx, m in enumerate(batch):
             try:
                 url = m.get("url")
@@ -952,12 +945,14 @@ def safe_send_media_group(bot, chat_id, media_list):
                 caption = (m.get("caption") or "").strip()
                 caption = caption if idx == 0 else None
                 t = (m.get("type") or m.get("mediaType") or "image").lower()
-                filename = "video.mp4" if t == "video" else "photo.png"
-                media_file = fetch_media(url, filename)
+                filename = "video.mp4" if t == "video" else "photo.jpg"
+                content = fetch_bytes(url)
+                file_for_group = InputFile(io.BytesIO(content), filename=filename)
                 if t == "video":
-                    group.append(_IMV(media=media_file, caption=caption))
+                    group.append(_IMV(media=file_for_group, caption=caption))
                 else:
-                    group.append(_IMP(media=media_file, caption=caption))
+                    group.append(_IMP(media=file_for_group, caption=caption))
+                prepared.append({"type": t, "content": content, "caption": caption, "filename": filename})
             except Exception as e:
                 log.warning(f"skip media {m.get('url')}: {e}")
         if not group:
@@ -966,13 +961,13 @@ def safe_send_media_group(bot, chat_id, media_list):
             bot.send_media_group(chat_id=chat_id, media=group)
         except Exception as e:
             log.warning(f"media group send failed: {e}")
-            for item in group:
+            for item in prepared:
                 try:
-                    caption = getattr(item, "caption", None)
-                    if isinstance(item, _IMV):
-                        bot.send_video(chat_id=chat_id, video=item.media, caption=caption, supports_streaming=True)
+                    file_obj = InputFile(io.BytesIO(item["content"]), filename=item["filename"])
+                    if item["type"] == "video":
+                        bot.send_video(chat_id=chat_id, video=file_obj, caption=item.get("caption"), supports_streaming=True)
                     else:
-                        bot.send_photo(chat_id=chat_id, photo=item.media, caption=caption)
+                        bot.send_photo(chat_id=chat_id, photo=file_obj, caption=item.get("caption"))
                 except Exception as ie:
                     log.warning(f"individual media send failed: {ie}")
 
@@ -1080,6 +1075,8 @@ def btn(update, ctx: CallbackContext):
             if not m.get("isActive", True):
                 caption += "_(временно недоступен для записи)_\n"
 
+            caption = caption.replace("(", "\\(").replace(")", "\\)")
+
             kb = kb_master_card(m["id"], m.get("teletypeUrl"))
             avatar = m.get("avatar")
             full_avatar = build_full_url(avatar) if avatar else None
@@ -1106,19 +1103,6 @@ def btn(update, ctx: CallbackContext):
                     parse_mode=ParseMode.MARKDOWN_V2,
                     reply_markup=kb
                 )
-        about_text = render_bot_text("about", "Это наши мастера 👆", {"studio": s.get("studioName") or "Студия"})
-        about_cover = bot_image("about")
-        if about_cover:
-            safe_send_photo(
-                q.message.bot,
-                q.message.chat_id,
-                build_full_url(about_cover),
-                caption=about_text,
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=kb_back_home(),
-            )
-        else:
-            q.message.reply_text(about_text, parse_mode=ParseMode.MARKDOWN, reply_markup=kb_back_home())
         return
 
     if data.startswith("portfolio:"):
